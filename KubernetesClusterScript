@@ -1,0 +1,73 @@
+import paramiko
+import time
+
+# Define the IP addresses of your CentOS VMs
+master_ip = '192.168.1.10'
+node1_ip = '192.168.1.11'
+node2_ip = '192.168.1.12'
+
+# Define your SSH credentials
+username = 'username'
+password = 'password'
+
+# Define the commands to install and configure Kubernetes
+commands = [
+    'sudo swapoff -a',
+    'sudo sed -i "/ swap / s/^/#/" /etc/fstab',
+    'sudo setenforce 0',
+    'sudo sed -i "s/^SELINUX=enforcing$/SELINUX=permissive/" /etc/selinux/config',
+    'sudo modprobe br_netfilter',
+    'sudo echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables',
+    'sudo echo '1' > /proc/sys/net/ipv4/ip_forward',
+    'sudo yum install -y docker',
+    'sudo systemctl enable docker',
+    'sudo systemctl start docker',
+    'sudo yum install -y yum-utils device-mapper-persistent-data lvm2',
+    'sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo',
+    'sudo yum install -y docker-ce docker-ce-cli containerd.io',
+    'sudo systemctl enable kubelet',
+    'sudo systemctl start kubelet',
+    'sudo yum install -y kubeadm kubectl',
+    'sudo kubeadm init --pod-network-cidr=10.244.0.0/16'
+]
+
+# Define a function to execute commands on a remote server via SSH
+def execute_command(ip_address, username, password, command):
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(ip_address, username=username, password=password)
+
+    stdin, stdout, stderr = ssh.exec_command(command)
+    time.sleep(1)
+
+    output = stdout.readlines()
+    error = stderr.readlines()
+
+    ssh.close()
+
+    return output, error
+
+# Install and configure Kubernetes on the master node
+for command in commands:
+    output, error = execute_command(master_ip, username, password, command)
+    print('Output:', output)
+    print('Error:', error)
+
+# Get the join command for the worker nodes
+join_command = ''
+with paramiko.SSHClient() as ssh:
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(master_ip, username=username, password=password)
+
+    stdin, stdout, stderr = ssh.exec_command('sudo kubeadm token create --print-join-command')
+    time.sleep(1)
+
+    join_command = stdout.read().decode().strip()
+
+    ssh.close()
+
+# Join the worker nodes to the Kubernetes cluster
+for ip_address in [node1_ip, node2_ip]:
+    output, error = execute_command(ip_address, username, password, join_command)
+    print('Output:', output)
+    print('Error:', error)
